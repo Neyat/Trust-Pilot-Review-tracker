@@ -6,6 +6,7 @@
 <title>Trustpilot Queue Tracker</title>
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f7fa; color: #1f2937; padding: 20px; }
@@ -264,29 +265,34 @@
   $("refreshBtn").addEventListener("click", () => { if (rows.length) render(); });
   $("slaTarget").addEventListener("change", () => { if (rows.length) render(); });
   $("sampleBtn").addEventListener("click", loadSample);
+  async function extractCsv(file) {
+    if (file.name.toLowerCase().endsWith(".zip")) {
+      const zip = await JSZip.loadAsync(file);
+      const csvFile = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith(".csv") && !f.dir);
+      if (!csvFile) throw new Error("No CSV found inside zip");
+      const text = await csvFile.async("string");
+      return { text, name: csvFile.name };
+    }
+    return { text: await file.text(), name: file.name };
+  }
+  function parseCsvText(text) {
+    return Papa.parse(text, { header: true, skipEmptyLines: true }).data.filter(r => r.ID);
+  }
   function handleFile(file) {
-    Papa.parse(file, {
-      header: true, skipEmptyLines: true,
-      complete: (res) => {
-        rows = res.data.filter((r) => r.ID);
-        window._loadedAt = new Date();
-        window._loadedFile = file.name;
-        $("meta").textContent = `Loaded ${rows.length} queue reviews from ${file.name}`;
-        render();
-      }
-    });
+    extractCsv(file).then(({ text, name }) => {
+      rows = parseCsvText(text);
+      window._loadedAt = new Date();
+      $("meta").textContent = `Loaded ${rows.length} queue reviews from ${name}`;
+      render();
+    }).catch(e => { $("meta").textContent = "Error reading file: " + e.message; });
   }
   function handlePrevFile(file) {
-    Papa.parse(file, {
-      header: true, skipEmptyLines: true,
-      complete: (res) => {
-        prevRows = res.data.filter((r) => r.ID);
-        window._prevLoadedAt = new Date();
-        window._prevFileName = file.name;
-        $("meta").textContent = `Loaded ${rows.length} current + ${prevRows.length} previous reviews`;
-        render();
-      }
-    });
+    extractCsv(file).then(({ text, name }) => {
+      prevRows = parseCsvText(text);
+      window._prevLoadedAt = new Date();
+      $("meta").textContent = `Loaded ${rows.length} current + ${prevRows.length} previous reviews`;
+      render();
+    }).catch(e => { $("meta").textContent = "Error reading previous file: " + e.message; });
   }
   function maxTs(rowSet) {
     const ts = rowSet.map(r => r.Requested && r.Requested.trim()).filter(Boolean);

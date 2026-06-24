@@ -163,7 +163,7 @@
       <div class="chart-wrap"><canvas id="chartVolume"></canvas></div>
     </div>
     <div class="card">
-      <h2>🏷️ Issue Type Breakdown</h2>
+      <h2>⭐ Star Rating Breakdown</h2>
       <div class="chart-wrap"><canvas id="chartIssue"></canvas></div>
     </div>
   </div>
@@ -192,9 +192,9 @@
     </table>
   </div>
   <div class="card" style="margin-bottom: 24px;">
-    <h2>🏷️ Issue Type Detail</h2>
+    <h2>⭐ Star Rating Detail</h2>
     <table>
-      <thead><tr><th>Issue</th><th class="num">Count</th><th class="num">% of queue</th></tr></thead>
+      <thead><tr><th>Star Rating</th><th class="num">Count</th><th class="num">% of queue</th></tr></thead>
       <tbody id="issueBody"></tbody>
       <tfoot><tr><td>TOTAL</td><td class="num" id="issueTotal">0</td><td class="num">100%</td></tr></tfoot>
     </table>
@@ -289,10 +289,18 @@
     });
   }
   function maxTs(rowSet) {
-    const ts = rowSet.map(r => [r.Requested, r.Updated].map(s => s && s.trim()).filter(Boolean)).flat().filter(Boolean);
+    const ts = rowSet.map(r => r.Requested && r.Requested.trim()).filter(Boolean);
     if (!ts.length) return null;
     ts.sort();
     return ts[ts.length - 1];
+  }
+  // Extract star rating label from Trustpilot subject line, e.g. "jiffy.com ★★☆☆☆ 123..."
+  function starLabel(subject) {
+    if (!subject) return "Unknown";
+    const filled = (subject.match(/★/g) || []).length;
+    if (filled === 0) return "Unknown";
+    const stars = "★".repeat(filled) + "☆".repeat(5 - filled);
+    return `${stars} ${filled} Star${filled !== 1 ? "s" : ""}`;
   }
   function loadSample() {
     const now = new Date();
@@ -306,16 +314,16 @@
     };
     const h = 3600000;
     const rows_sample = [
-      { ID: "1001", "Ticket status": "Open",  Subject: "1-star review — damaged order",    Requester: "Alice", Requested: fmtTs(-14*h), Updated: fmtTs(-2*h),   SLA: fmtTs(-3*h),  Issue: "System::order damaged or defective" },
-      { ID: "1002", "Ticket status": "New",   Subject: "1-star review — missing package",  Requester: "Bob",   Requested: fmtTs(-13*h), Updated: fmtTs(-1*h),   SLA: fmtTs(-1*h),  Issue: "System::late delivery" },
-      { ID: "1003", "Ticket status": "Open",  Subject: "2-star review — wrong size",       Requester: "Carol", Requested: fmtTs(-11*h), Updated: fmtTs(-0.5*h), SLA: fmtTs(1*h),   Issue: "System::wrong items delivered" },
-      { ID: "1004", "Ticket status": "New",   Subject: "2-star review — late delivery",    Requester: "Dave",  Requested: fmtTs(-7*h),  Updated: fmtTs(-1*h),   SLA: fmtTs(5*h),   Issue: "System::late delivery" },
-      { ID: "1005", "Ticket status": "Open",  Subject: "3-star review — tracking update",  Requester: "Eve",   Requested: fmtTs(-4*h),  Updated: fmtTs(-0.5*h), SLA: fmtTs(8*h),   Issue: "System::tracking issue" },
-      { ID: "1006", "Ticket status": "New",   Subject: "General inquiry — no star",        Requester: "Frank", Requested: fmtTs(-6*h),  Updated: fmtTs(-1*h),   SLA: "",            Issue: "(Untagged)" },
+      { ID: "9001", "Ticket status": "New", Subject: "jiffy.com ★☆☆☆☆ 111Damaged shirts received", Requester: "Alice",   Requested: fmtTs(-14*h), Assignee: "" },
+      { ID: "9002", "Ticket status": "New", Subject: "jiffy.com ★☆☆☆☆ 222Missing package still not here", Requester: "Bob", Requested: fmtTs(-13*h), Assignee: "" },
+      { ID: "9003", "Ticket status": "New", Subject: "jiffy.com ★★☆☆☆ 333Wrong size delivered", Requester: "Carol",  Requested: fmtTs(-11*h), Assignee: "" },
+      { ID: "9004", "Ticket status": "New", Subject: "jiffy.com ★★☆☆☆ 444Shipping delayed again", Requester: "Dave",  Requested: fmtTs(-7*h),  Assignee: "" },
+      { ID: "9005", "Ticket status": "New", Subject: "jiffy.com ★★★☆☆ 555Tracking never updated", Requester: "Eve",   Requested: fmtTs(-4*h),  Assignee: "" },
+      { ID: "9006", "Ticket status": "New", Subject: "jiffy.com ★★★★☆ 666Good but DTF peeling", Requester: "Frank", Requested: fmtTs(-6*h),  Assignee: "" },
     ];
-    const header = "ID,Ticket status,Subject,Requester,Requested,Updated,SLA,Issue\n";
+    const header = "ID,Ticket status,Subject,Requester,Requested,Assignee\n";
     const csv = header + rows_sample.map(r =>
-      [r.ID, r["Ticket status"], r.Subject, r.Requester, r.Requested, r.Updated, r.SLA, r.Issue]
+      [r.ID, r["Ticket status"], r.Subject, r.Requester, r.Requested, r.Assignee]
         .map(v => `"${v}"`).join(",")
     ).join("\n");
     rows = Papa.parse(csv, { header: true, skipEmptyLines: true }).data;
@@ -337,7 +345,6 @@
     const atRiskHrs = 2;
     const enriched = rows.map(r => {
       const reqD  = parseDate(r.Requested, tz);
-      const updD  = parseDate(r.Updated,   tz);
       const ageH  = reqD ? (now - reqD) / 3600000 : null;
       let slaStatus = "none";
       if (ageH !== null) {
@@ -350,8 +357,9 @@
         }
       }
       return {
-        ...r, _req: reqD, _upd: updD, _ageH: ageH, _slaStatus: slaStatus,
-        _reqKey: dateKeyRaw(r.Requested), _updKey: dateKeyRaw(r.Updated)
+        ...r, _req: reqD, _ageH: ageH, _slaStatus: slaStatus,
+        _reqKey: dateKeyRaw(r.Requested),
+        _starLabel: starLabel(r.Subject)
       };
     });
     const total = enriched.length;
@@ -425,7 +433,7 @@
     $("dailyInQueueTotal").textContent = fmt(sumNew);
     const issues = {};
     enriched.forEach(r => {
-      const label = (r.Issue || "").trim() || "(Untagged)";
+      const label = r._starLabel || "Unknown";
       issues[label] = (issues[label]||0) + 1;
     });
     const issueList = Object.entries(issues).sort((a,b) => b[1]-a[1]);
@@ -472,9 +480,7 @@
         <td class="num"><span class="status-dot" style="background:${b.dot}"></span></td>
       </tr>`;
     }).join("");
-    const allReq = enriched.map(r => r._req).filter(Boolean);
-    const allUpd = enriched.map(r => r._upd).filter(Boolean);
-    const allStamps = [...allReq, ...allUpd];
+    const allStamps = enriched.map(r => r._req).filter(Boolean);
     const earliest = allStamps.length ? new Date(Math.min(...allStamps)) : null;
     const latest   = allStamps.length ? new Date(Math.max(...allStamps)) : null;
     $("tsDataRange").textContent = earliest && latest
